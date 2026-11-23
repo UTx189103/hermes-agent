@@ -348,11 +348,18 @@ def _wrap_command_script(
     return "\n".join(parts)
 
 
-def _split_cwd_marker(output: str, marker: str) -> tuple[str | None, str] | None:
+def _split_cwd_marker(output: str, marker: str, *, whole_line: bool = False) -> tuple[str | None, str] | None:
     """Locate the last ``marker<path>marker`` pair in *output*. Returns
     ``(cwd_path_or_None, output_without_marker_line)``, or ``None`` when no complete pair
     exists. The stripped span runs from the ``\\n`` the wrapper injected before the marker
-    through the end of the marker line."""
+    through the end of the marker line.
+
+    *whole_line* requires the pair to occupy a line of its own. A control line is emitted by
+    the wrapper before the command runs, so that is the shape of a real one — while output
+    that merely quotes the wrapper script (a ``pgrep``/``ps`` line for this very shell,
+    ``cat /proc/$$/cmdline``) carries the ``printf`` format's literal ``%s`` between two
+    copies of the marker, which would otherwise be reported as the directory the command
+    "fell back" to."""
     last = output.rfind(marker)
     if last == -1:
         return None
@@ -362,8 +369,12 @@ def _split_cwd_marker(output: str, marker: str) -> tuple[str | None, str] | None
         return None
     cwd_path = output[first + len(marker) : last] or None  # verbatim: a directory name may end in a space
     line_start = output.rfind("\n", 0, first)
+    if whole_line and first != 0 and line_start != first - 1:
+        return None
     if line_start == -1:
         line_start = first
     line_end = output.find("\n", last + len(marker))
+    if whole_line and line_end == -1:
+        return None
     line_end = line_end + 1 if line_end != -1 else len(output)
     return cwd_path, output[:line_start] + output[line_end:]

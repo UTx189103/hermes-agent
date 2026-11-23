@@ -9,6 +9,7 @@ drive a real bash so the wrapper's own ``cd`` is the thing under test.
 
 import json
 import os
+import shlex
 import shutil
 
 import pytest
@@ -38,6 +39,31 @@ def test_dead_cwd_runs_in_fallback_and_reports_it_once(tmp_path):
         env.cwd = str(doomed)  # a stale env cwd must not taint a command given a live one
         healthy = env.execute("pwd", cwd=str(tmp_path), timeout=30, allow_cwd_fallback=True)
         assert healthy["returncode"] == 0 and "cwd_fallback" not in healthy
+    finally:
+        env.cleanup()
+
+
+def test_output_quoting_the_wrapper_is_not_a_fallback(tmp_path):
+    """A control line is emitted before the command runs, so it occupies a line of its own.
+
+    Output that merely quotes the wrapper script — a ``pgrep``/``ps`` line for this very
+    shell, ``cat /proc/$$/cmdline`` — carries the ``printf`` format's literal ``%s`` between
+    two copies of the marker. Reading that as a control line reported a fallback that never
+    happened and named ``%s`` as the directory the command ran in.
+    """
+    from tools.environments.base_session_env import _cwd_fallback_marker
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(LocalEnvironment, "init_session", lambda self, *a, **k: None)
+        env = LocalEnvironment(cwd=str(tmp_path), timeout=30)
+    try:
+        marker = _cwd_fallback_marker(env._session_id)
+        quoted = f"printf '\\n{marker}%s{marker}\\n' \"$(pwd -P)\";"
+        result = env.execute("printf '%s\\n' " + shlex.quote(quoted),
+                             timeout=30, allow_cwd_fallback=True)
+        assert result["returncode"] == 0, result["output"]
+        assert "cwd_fallback" not in result
+        assert quoted in result["output"]  # the quoted wrapper line is left untouched
     finally:
         env.cleanup()
 

@@ -863,8 +863,11 @@ class BaseEnvironment(LongLivedProcessMixin, ABC):
         # Housekeeping from "/" (the background poller) or a one-off workdir must not move the session.
         self._update_cwd(result, move_session=moves_session)
         used = output_holder[0].control_value if output_holder else None
-        if allow_cwd_fallback and not used and (split := _split_cwd_marker(result.get("output", ""), self._cwd_fallback_marker)):
-            used, result["output"] = split  # login-shell noise printed ahead of the wrapper's line
+        if allow_cwd_fallback and not used and (split := _split_cwd_marker(
+                result.get("output", ""), self._cwd_fallback_marker, whole_line=True)):
+            # login-shell noise may lead the stream, but the wrapper's line is still a line of
+            # its own; a marker pair quoted inside command output is not one.
+            used, result["output"] = split
         if used:
             cwd_fallback = cwd_fallback or {"requested": effective_cwd, "used": used}
         if getattr(self, "_recreated_notice_pending", False):
